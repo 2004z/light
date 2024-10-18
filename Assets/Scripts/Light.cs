@@ -9,7 +9,8 @@ public class Light : MonoBehaviour, IRay
     private Rigidbody2D rb; // 获取刚体
     public LayerMask collisionLayer; // 射线碰撞的图层
     public float rayLength = 10f; // 限制射线长度
-    public float lineDuration = 1f; // 线条持续时间    
+    public float lineDuration = 1f; // 线条持续时间
+    public int maxReflections = 5; // 最大反射次数
 
     private Vector2 startPoint; // 射线起始点
     private Vector2 endPoint; // 射线终点
@@ -36,11 +37,10 @@ public class Light : MonoBehaviour, IRay
     {
         Move();
         if (Input.GetKeyDown(KeyCode.J))
-        {          
-                // 调用 Ray() 方法
-                ((IRay)this).Ray();                    
+        {
+            // 调用 Ray() 方法
+            ((IRay)this).Ray();
         }
-        
     }
 
     void Move()
@@ -48,6 +48,7 @@ public class Light : MonoBehaviour, IRay
         // 获取输入
         float horizontalInput = Input.GetAxisRaw("Horizontal");
         float verticalInput = Input.GetAxisRaw("Vertical");
+
         // 更新最后一次按下的方向
         if (horizontalInput > 0)
         {
@@ -57,14 +58,15 @@ public class Light : MonoBehaviour, IRay
         {
             lastInputDirection = Vector2.left; // 向左
         }
-        else if (verticalInput < 0)
+        else if (verticalInput > 0)
         {
             lastInputDirection = Vector2.up; // 向上
         }
-        else if (verticalInput > 0)
+        else if (verticalInput < 0)
         {
             lastInputDirection = Vector2.down; // 向下
         }
+
         // 计算移动方向
         Vector2 targetVelocity = new Vector2(horizontalInput, verticalInput).normalized * MoveSeppd;
 
@@ -76,44 +78,74 @@ public class Light : MonoBehaviour, IRay
     {
         // 使用最后一次按下的方向射出射线
         direction = lastInputDirection;
-        // 计算射线起始点和终点
+
+        // 存储射线段的起点和终点
+        List<Vector3> rayPoints = new List<Vector3>();
+
+        // 初始射线起点
         startPoint = rb.position;
-        endPoint = startPoint + direction * rayLength;
-        
-        // 发射射线并检测碰撞
-        hit = Physics2D.Raycast(startPoint, direction, rayLength, collisionLayer);
+        rayPoints.Add(startPoint);
 
-        if (hit.collider != null)
+        // 初始射线方向和剩余长度
+        Vector2 currentDirection = direction;
+        float remainingLength = rayLength;
+        int reflections = 0; // 当前反射次数
+
+        while (remainingLength > 0 && reflections < maxReflections)
         {
-            Vector2 normal = hit.normal;
-            Vector2 reflection = Vector2.Reflect(direction, normal); // 反射向量
+            // 发射射线并检测碰撞
+            hit = Physics2D.Raycast(startPoint, currentDirection, remainingLength, collisionLayer);
 
-            // 更新方向和终点
-            endPoint = hit.point+reflection*(rayLength-hit.distance);
+            if (hit.collider != null && hit.collider.tag == "Reflection")
+            {
+                // 碰撞点和法向量
+                Vector2 hitPoint = hit.point;
+                Vector2 normal = hit.normal;
 
-            // 设置 LineRenderer 的点数和位置
-            lineRenderer.positionCount = 3;
-            lineRenderer.SetPosition(0, startPoint);
-            lineRenderer.SetPosition(1, hit.point);
-            lineRenderer.SetPosition(2, endPoint);
+                // 计算反射向量
+                Vector2 reflection = Vector2.Reflect(currentDirection, normal);
 
-            Debug.Log("Ray hit at point: " + hit.point + ", normal: " + normal + ", reflection direction: " + reflection);
+                // 打印法向量、入射向量和反射向量以便调试
+                Debug.Log("Hit normal: " + normal + ", Incident vector: " + currentDirection + ", Reflection vector: " + reflection);
+
+                // 更新起点和方向
+                startPoint = hitPoint;
+                currentDirection = reflection;
+
+                // 添加碰撞点
+                rayPoints.Add(hitPoint);
+
+                // 减少剩余长度
+                remainingLength -= hit.distance;
+                reflections++; // 增加反射次数
+
+                Debug.Log("Ray hit at point: " + hit.point + ", normal: " + normal + ", reflection direction: " + reflection);
+            }
+            else
+            {
+                // 如果没有碰撞，延伸到剩余长度的终点
+                endPoint = startPoint + currentDirection * remainingLength;
+                rayPoints.Add(endPoint);
+                remainingLength = 0;
+
+                Debug.Log("Ray endpoint: " + endPoint);
+            }
         }
-        else
+
+        // 设置 LineRenderer 的点数和位置
+        lineRenderer.positionCount = rayPoints.Count;
+        for (int i = 0; i < rayPoints.Count; i++)
         {
-            // 没有碰撞时设置 LineRenderer 的点数和位置
-            lineRenderer.positionCount = 2;
-            lineRenderer.SetPosition(0, startPoint);
-            lineRenderer.SetPosition(1, endPoint);
-
-            Debug.Log("Ray endpoint: " + endPoint);
+            lineRenderer.SetPosition(i, rayPoints[i]);
         }
+
         // 启动协程来清除线条
         StartCoroutine(ClearLineAfterDelay(lineDuration));
 
         // 确认 LineRenderer 的位置设置是否正确
-        Debug.Log("LineRenderer positions set: [" + startPoint + ", " + hit.point + ", " + endPoint + "]");
+        Debug.Log("LineRenderer positions set: " + string.Join(", ", rayPoints));
     }
+
     private IEnumerator ClearLineAfterDelay(float delay)
     {
         // 等待指定的时间
@@ -122,5 +154,5 @@ public class Light : MonoBehaviour, IRay
         // 清除 LineRenderer 的点数
         lineRenderer.positionCount = 0;
     }
-
 }
+
